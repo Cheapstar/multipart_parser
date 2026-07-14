@@ -27,7 +27,7 @@ impl DataType {
 impl fmt::Display for DataType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            DataType::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
+            DataType::Bytes(bytes) => write!(f, "Bytes({} bytes) {:#?}", bytes.len(), bytes),
             DataType::File(named_temp_file) => match named_temp_file.as_file().try_clone() {
                 Ok(mut cloned) => {
                     if let Err(e) = cloned.seek(SeekFrom::Start(0)) {
@@ -281,19 +281,21 @@ impl MultiPartParser {
         } else {
             new_chunk.extend_from_slice(chunk);
 
-            // boundary has been found out
-            if self.buffer.is_empty() {
-                // if this chunk contain boundary of parent parser then keep it here
-                let start_of_boundary =
-                    substring_partial_search(&new_chunk, self.boundary_pattern.as_bytes());
+            if self.state != MultiPartParserState::Start {
+                // boundary has been found out
+                if self.buffer.is_empty() {
+                    // if this chunk contain boundary of parent parser then keep it here
+                    let start_of_boundary =
+                        substring_partial_search(&new_chunk, self.boundary_pattern.as_bytes());
 
-                self.index_after_child = start_of_boundary;
-                if !start_of_boundary.is_none() {
+                    self.index_after_child = start_of_boundary;
+                    if !start_of_boundary.is_none() {
+                        self.buffer.extend_from_slice(&new_chunk);
+                    }
+                } else {
+                    // boundary has been previously found out , so just append the just to use it later on
                     self.buffer.extend_from_slice(&new_chunk);
                 }
-            } else {
-                // boundary has been previously found out , so just append the just to use it later on
-                self.buffer.extend_from_slice(&new_chunk);
             }
         }
 
@@ -444,12 +446,13 @@ impl MultiPartParser {
 
                 let boundary_index =
                     substring_search(&new_chunk, index, self.boundary_pattern.as_bytes());
+                // let stringified_bytes = String::from_utf8_lossy(&new_chunk);
+                // println!("Header Bytes are: {}", stringified_bytes);
                 if boundary_index.is_none() {
                     // No boundary found, but there may be a partial match at the end of the chunk.
-                    let partial_tail_index = substring_partial_search(
-                        &new_chunk[index..],
-                        self.boundary_pattern.as_bytes(),
-                    );
+
+                    let partial_tail_index =
+                        substring_partial_search(&new_chunk, self.boundary_pattern.as_bytes());
 
                     if partial_tail_index.is_none() {
                         self.append(&new_chunk[index..])?;
@@ -594,6 +597,34 @@ mod tests {
     use super::*;
     const MOCK_MULTIPART_PAYLOAD: &[u8] = b"------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"username\"\r\n\r\njohn_doe\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"profile_picture\"; filename=\"profile.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x01\x00\x60\x00\x60\x00\x00\xFF\xDB\x00\x43\x00\x08\x06\x06\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{\"age\": 30, \"location\": \"New York\"}\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW--\r\n";
     const MOCK_NESTED_MULTIPART_PAYLOAD: &[u8] = b"------OuterBoundary7f3a9c2e\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{\"user_id\": 4821, \"action\": \"bulk_upload\", \"tags\": [\"invoice\", \"2026\", \"q3\"]}\r\n------OuterBoundary7f3a9c2e\r\nContent-Disposition: form-data; name=\"description\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nThis upload contains a quarterly invoice batch along with its supporting attachments.\r\n------OuterBoundary7f3a9c2e\r\nContent-Disposition: form-data; name=\"attachments\"\r\nContent-Type: multipart/mixed; boundary=InnerBoundary1d5e8b41\r\n\r\n--InnerBoundary1d5e8b41\r\nContent-Disposition: attachment; filename=\"invoice_q3.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n%%EOF\r\n--InnerBoundary1d5e8b41\r\nContent-Disposition: attachment; filename=\"receipt_scan.png\"\r\nContent-Type: image/png\r\n\r\n\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x01\x00\x60\x00\x60\x00\x00\xFF\xDB\x00\x43\x00\x08\x06\x06\r\n--InnerBoundary1d5e8b41\r\nContent-Disposition: attachment; filename=\"notes.txt\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nScanned receipt is slightly faded on the top-left corner, but totals are legible.\r\n--InnerBoundary1d5e8b41--\r\n\r\n------OuterBoundary7f3a9c2e\r\nContent-Disposition: form-data; name=\"submitted_by\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\njane.doe@example.com\r\n------OuterBoundary7f3a9c2e--\r\n";
+    // 1. Empty body value (field with no content at all)
+    const MOCK_EMPTY_FIELD_PAYLOAD: &[u8] = b"------EmptyBoundary123\r\nContent-Disposition: form-data; name=\"empty_field\"\r\n\r\n\r\n------EmptyBoundary123--\r\n";
+
+    // 2. Multiple files in one payload (no text fields at all)
+    const MOCK_MULTI_FILE_PAYLOAD: &[u8] = b"------MultiFileBoundaryAbc1\r\nContent-Disposition: form-data; name=\"file1\"; filename=\"a.txt\"\r\nContent-Type: text/plain\r\n\r\nHello from file one.\r\n------MultiFileBoundaryAbc1\r\nContent-Disposition: form-data; name=\"file2\"; filename=\"b.txt\"\r\nContent-Type: text/plain\r\n\r\nHello from file two.\r\n------MultiFileBoundaryAbc1--\r\n";
+
+    // 3. Large single field that should exceed max_body_limit_until_file and get promoted to a temp file
+    //    (repeats "0123456789" 2000 times = 20,000 bytes)
+    fn build_large_field_payload() -> Vec<u8> {
+        let boundary = "----LargeFieldBoundaryXYZ";
+        let mut body = Vec::new();
+        body.extend_from_slice(format!("--{}\r\n", boundary).as_bytes());
+        body.extend_from_slice(b"Content-Disposition: form-data; name=\"big_text\"\r\n");
+        body.extend_from_slice(b"Content-Type: text/plain\r\n\r\n");
+        for _ in 0..2000 {
+            body.extend_from_slice(b"0123456789");
+        }
+        body.extend_from_slice(b"\r\n");
+        body.extend_from_slice(format!("--{}--\r\n", boundary).as_bytes());
+        body
+    }
+
+    // 4. Field name with unicode content
+    const MOCK_UNICODE_PAYLOAD: &[u8] = b"------UnicodeBoundary456\r\nContent-Disposition: form-data; name=\"greeting\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n\xE4\xBD\xA0\xE5\xA5\xBD, world! \xF0\x9F\x8C\x8D\r\n------UnicodeBoundary456--\r\n";
+
+    // 5. Headers with extra/uncommon casing and additional custom header
+    const MOCK_CUSTOM_HEADERS_PAYLOAD: &[u8] = b"------CustomHeaderBoundary789\r\ncontent-disposition: form-data; name=\"custom\"\r\nX-Custom-Meta: some-value\r\nContent-Type: text/plain\r\n\r\nField with custom headers.\r\n------CustomHeaderBoundary789--\r\n";
+
     #[test]
     fn parse_simple_multipart() {
         let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW".to_owned();
@@ -611,7 +642,7 @@ mod tests {
                 break;
             }
 
-            parser.parse(&chunk).unwrap();
+            parser.parse(&chunk[..bytes_read]).unwrap();
         }
 
         for ref part in parser.parts {
@@ -635,11 +666,121 @@ mod tests {
                 break;
             }
 
-            parser.parse(&chunk).unwrap();
+            parser.parse(&chunk[..bytes_read]).unwrap();
         }
 
         for ref part in parser.parts {
             println!("Here are the Nested parts {}", part);
+        }
+    }
+
+    #[test]
+    fn parse_empty_field() {
+        let boundary = "----EmptyBoundary123".to_owned();
+        let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
+
+        let mut chunk = [0u8; 80];
+        let v = Vec::from(MOCK_EMPTY_FIELD_PAYLOAD);
+        let mut slice = &v[..];
+        loop {
+            let bytes_read = slice.read(&mut chunk).unwrap();
+            if bytes_read == 0 {
+                break;
+            }
+            parser.parse(&chunk[..bytes_read]).unwrap();
+        }
+
+        for ref part in parser.parts {
+            println!("Empty field part: {}", part);
+        }
+    }
+
+    #[test]
+    fn parse_multiple_files() {
+        let boundary = "----MultiFileBoundaryAbc1".to_owned();
+        let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
+
+        let mut chunk = [0u8; 64];
+        let v = Vec::from(MOCK_MULTI_FILE_PAYLOAD);
+        let mut slice = &v[..];
+        loop {
+            let bytes_read = slice.read(&mut chunk).unwrap();
+            if bytes_read == 0 {
+                break;
+            }
+            parser.parse(&chunk[..bytes_read]).unwrap();
+        }
+
+        assert_eq!(parser.parts.len(), 2);
+        for ref part in parser.parts {
+            println!("Multi-file part: {}", part);
+        }
+    }
+
+    #[test]
+    fn parse_large_field_promotes_to_file() {
+        let boundary = "----LargeFieldBoundaryXYZ".to_owned();
+        // max_body_limit_until_file is small (1024) so this 20,000-byte field
+        // should get promoted to a temp file partway through.
+        let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
+
+        let payload = build_large_field_payload();
+        let mut chunk = [0u8; 256];
+        let mut slice = &payload[..];
+        loop {
+            let bytes_read = slice.read(&mut chunk).unwrap();
+            if bytes_read == 0 {
+                break;
+            }
+            parser.parse(&chunk[..bytes_read]).unwrap();
+        }
+
+        for ref part in parser.parts {
+            println!("Large field part: {}", part);
+            // Optionally assert it became a File variant, e.g.:
+            // assert!(matches!(part.data, Some(DataType::File(_))));
+        }
+    }
+
+    #[test]
+    fn parse_unicode_field() {
+        let boundary = "----UnicodeBoundary456".to_owned();
+        let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
+
+        let mut chunk = [0u8; 32]; // small chunk size to force unicode bytes to split across reads
+        let v = Vec::from(MOCK_UNICODE_PAYLOAD);
+        let mut slice = &v[..];
+        loop {
+            let bytes_read = slice.read(&mut chunk).unwrap();
+            if bytes_read == 0 {
+                break;
+            }
+            parser.parse(&chunk[..bytes_read]).unwrap();
+        }
+
+        for ref part in parser.parts {
+            println!("Unicode part: {}", part);
+        }
+    }
+
+    #[test]
+    fn parse_custom_headers() {
+        let boundary = "----CustomHeaderBoundary789".to_owned();
+        let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
+
+        let mut chunk = [0u8; 80];
+        let v = Vec::from(MOCK_CUSTOM_HEADERS_PAYLOAD);
+        let mut slice = &v[..];
+        loop {
+            let bytes_read = slice.read(&mut chunk).unwrap();
+            if bytes_read == 0 {
+                break;
+            }
+            parser.parse(&chunk[..bytes_read]).unwrap();
+        }
+
+        for ref part in parser.parts {
+            println!("Custom header part: {}", part);
         }
     }
 }

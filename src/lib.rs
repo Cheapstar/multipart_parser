@@ -1,13 +1,10 @@
 use std::{
     collections::HashMap,
     fmt,
-    fs::File,
-    io::{BufRead, BufReader, Error, Read, Seek, SeekFrom, Write},
-    net::TcpStream,
-    ops::Index,
+    io::{BufRead, Error, Read, Seek, SeekFrom, Write},
 };
 
-use tempfile::{NamedTempFile, tempfile};
+use tempfile::NamedTempFile;
 
 #[derive(Debug)]
 
@@ -285,11 +282,19 @@ impl MultiPartParser {
                 // boundary has been found out
                 if self.buffer.is_empty() {
                     // if this chunk contain boundary of parent parser then keep it here
-                    let start_of_boundary =
-                        substring_partial_search(&new_chunk, self.boundary_pattern.as_bytes());
+                    let boundary_index_inside_chunk =
+                        substring_search(&new_chunk, index, self.boundary_pattern.as_bytes());
 
-                    self.index_after_child = start_of_boundary;
-                    if !start_of_boundary.is_none() {
+                    if boundary_index_inside_chunk.is_none() {
+                        let partial_boundary_check =
+                            substring_partial_search(&new_chunk, self.boundary_pattern.as_bytes());
+
+                        self.index_after_child = partial_boundary_check;
+                        if !partial_boundary_check.is_none() {
+                            self.buffer.extend_from_slice(&new_chunk);
+                        }
+                    } else {
+                        self.index_after_child = boundary_index_inside_chunk;
                         self.buffer.extend_from_slice(&new_chunk);
                     }
                 } else {

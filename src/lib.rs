@@ -1,18 +1,19 @@
 use std::{
     collections::HashMap,
+    fmt,
     fs::File,
-    io::{BufRead, BufReader, Error, Read, Write},
+    io::{BufRead, BufReader, Error, Read, Seek, SeekFrom, Write},
     net::TcpStream,
     ops::Index,
 };
 
-use tempfile::tempfile;
+use tempfile::{NamedTempFile, tempfile};
 
 #[derive(Debug)]
 
 enum DataType {
     Bytes(Vec<u8>),
-    File(File),
+    File(NamedTempFile),
 }
 
 impl DataType {
@@ -23,7 +24,31 @@ impl DataType {
         }
     }
 }
-
+impl fmt::Display for DataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DataType::Bytes(bytes) => write!(f, "Bytes({} bytes)", bytes.len()),
+            DataType::File(named_temp_file) => match named_temp_file.as_file().try_clone() {
+                Ok(mut cloned) => {
+                    if let Err(e) = cloned.seek(SeekFrom::Start(0)) {
+                        return write!(f, "File(<error seeking: {}>)", e);
+                    }
+                    let mut buf = Vec::new();
+                    match cloned.read_to_end(&mut buf) {
+                        Ok(_) => write!(
+                            f,
+                            "File({} bytes, path={:?})",
+                            buf.len(),
+                            named_temp_file.path()
+                        ),
+                        Err(e) => write!(f, "File(<error reading file: {}>)", e),
+                    }
+                }
+                Err(e) => write!(f, "File(<error cloning handle: {}>)", e),
+            },
+        }
+    }
+}
 #[derive(Debug)]
 struct MultiPart {
     headers: Option<HashMap<String, String>>,
@@ -67,36 +92,71 @@ impl MultiPart {
             }
         });
 
-        let content_type = headers.get("Content-type").map(|s| s.to_owned());
+        let content_type = headers.get("Content-Type").map(|s| s.to_owned());
+
+        self.content_type = content_type;
 
         self.headers = Some(headers);
     }
 
     fn write(&mut self, chunk: &[u8]) -> Result<(), MultiPartParserError> {
         let headers = self.headers.as_ref().unwrap();
-        if self.data.is_none() {
-            if headers.contains_key("filename") {
-                let temp_file = tempfile().unwrap();
-                self.data = Some(DataType::File(temp_file));
-            } else {
-                self.data = Some(DataType::Bytes(Vec::with_capacity(1024)));
+        let is_file_part = headers
+            .get("content-disposition")
+            .map(|cd| cd.contains("filename="))
+            .unwrap_or(false);
+
+        match self.data.take() {
+            // First chunk for this part
+            None => {
+                if is_file_part {
+                    let mut temp_file = tempfile::Builder::new()
+                        .prefix("multipart")
+                        .suffix(".tmp")
+                        .tempfile_in("temp_files/")
+                        .map_err(|e| MultiPartParserError::IOError(e))?;
+
+                    temp_file
+                        .write_all(chunk)
+                        .map_err(|e| MultiPartParserError::IOError(e))?;
+
+                    self.data = Some(DataType::File(temp_file));
+                } else {
+                    let mut buf = Vec::with_capacity(1024);
+                    buf.extend_from_slice(chunk);
+                    self.data = Some(DataType::Bytes(buf));
+                }
             }
-        }
 
-        if let Some(DataType::Bytes(items)) = self.data.take() {
-            if items.len() > self.max_body_limit_until_file as usize {
-                let mut file = tempfile().unwrap();
-                file.write_all(&items).unwrap();
+            // Already have in-memory bytes — maybe promote to file
+            Some(DataType::Bytes(mut items)) => {
+                if items.len() + chunk.len() > self.max_body_limit_until_file as usize {
+                    let mut temp_file = tempfile::Builder::new()
+                        .prefix("multipart")
+                        .suffix(".tmp")
+                        .tempfile_in("temp_files/")
+                        .map_err(|e| MultiPartParserError::IOError(e))?;
 
-                let mut inner_data = DataType::File(file);
+                    temp_file
+                        .write_all(&items)
+                        .map_err(|e| MultiPartParserError::IOError(e))?;
+                    temp_file
+                        .write_all(chunk)
+                        .map_err(|e| MultiPartParserError::IOError(e))?;
 
-                inner_data.write_all(chunk);
-                self.data = Some(inner_data);
-            } else {
-                let mut inner_data = DataType::Bytes(items);
+                    self.data = Some(DataType::File(temp_file));
+                } else {
+                    items.extend_from_slice(chunk);
+                    self.data = Some(DataType::Bytes(items));
+                }
+            }
 
-                inner_data.write_all(chunk);
-                self.data = Some(inner_data);
+            // Already writing to a file — just keep appending (this branch was missing!)
+            Some(DataType::File(mut temp_file)) => {
+                temp_file
+                    .write_all(chunk)
+                    .map_err(|e| MultiPartParserError::IOError(e))?;
+                self.data = Some(DataType::File(temp_file));
             }
         }
 
@@ -104,6 +164,53 @@ impl MultiPart {
     }
 }
 
+impl fmt::Display for MultiPart {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "MultiPart {{")?;
+
+        match &self.headers {
+            Some(headers) if !headers.is_empty() => {
+                writeln!(f, "  headers: {{")?;
+                for (key, value) in headers {
+                    writeln!(f, "    {}: {},", key, value)?;
+                }
+                writeln!(f, "  }},")?;
+            }
+            Some(_) => {
+                writeln!(f, "  headers: {{}},")?;
+            }
+            None => {
+                writeln!(f, "  headers: None,")?;
+            }
+        }
+
+        match &self.data {
+            Some(data) => {
+                writeln!(f, "  data: {},", data)?;
+            }
+            None => {
+                writeln!(f, "  data: None,")?;
+            }
+        }
+
+        match &self.content_type {
+            Some(ct) => {
+                writeln!(f, "  content_type: {},", ct)?;
+            }
+            None => {
+                writeln!(f, "  content_type: None,")?;
+            }
+        }
+
+        writeln!(
+            f,
+            "  max_body_limit_until_file: {},",
+            self.max_body_limit_until_file
+        )?;
+        writeln!(f, "  max_file_size: {},", self.max_file_size)?;
+        write!(f, "}}")
+    }
+}
 struct MultiPartParser {
     max_header_size: u16,
     max_body_limit_until_file: u32,
@@ -119,6 +226,7 @@ struct MultiPartParser {
     content_length: usize,
     child_parser: Option<Box<MultiPartParser>>,
     parts: Vec<MultiPart>,
+    index_after_child: Option<usize>,
 }
 
 impl MultiPartParser {
@@ -147,6 +255,7 @@ impl MultiPartParser {
             child_parser: None,
             current_part: MultiPart::new(max_body_limit_until_file, max_file_size),
             parts: Vec::<MultiPart>::new(),
+            index_after_child: None,
         }
     }
 
@@ -157,21 +266,39 @@ impl MultiPartParser {
 
         let mut new_chunk = Vec::<u8>::new();
         let mut index: usize = 0;
-        if !self.buffer.is_empty() {
-            let new_chunk_size = self.buffer.len() + chunk.len();
-            new_chunk.reserve_exact(new_chunk_size);
-            new_chunk.extend_from_slice(&self.buffer);
-            new_chunk.extend_from_slice(chunk);
-            self.buffer.clear();
-            self.buffer.shrink_to(0);
+
+        if self.child_parser.is_none() {
+            if !self.buffer.is_empty() {
+                let new_chunk_size = self.buffer.len() + chunk.len();
+                new_chunk.reserve_exact(new_chunk_size);
+                new_chunk.extend_from_slice(&self.buffer);
+                new_chunk.extend_from_slice(chunk);
+                self.buffer.clear();
+                self.buffer.shrink_to(0);
+            } else {
+                new_chunk.extend_from_slice(chunk);
+            }
         } else {
             new_chunk.extend_from_slice(chunk);
+
+            // boundary has been found out
+            if self.buffer.is_empty() {
+                // if this chunk contain boundary of parent parser then keep it here
+                let start_of_boundary =
+                    substring_partial_search(&new_chunk, self.boundary_pattern.as_bytes());
+
+                self.index_after_child = start_of_boundary;
+                if !start_of_boundary.is_none() {
+                    self.buffer.extend_from_slice(&new_chunk);
+                }
+            } else {
+                // boundary has been previously found out , so just append the just to use it later on
+                self.buffer.extend_from_slice(&new_chunk);
+            }
         }
 
         loop {
             if self.state == MultiPartParserState::Start {
-                println!("Entering Start");
-
                 if new_chunk.len() < self.opening_boundary_length as usize {
                     self.buffer.extend_from_slice(&new_chunk);
                     break;
@@ -188,8 +315,6 @@ impl MultiPartParser {
 
             // we need this extra state to determine which boundary it is initial or final
             if self.state == MultiPartParserState::AfterBoundary {
-                println!("Entering After Boundary");
-
                 if new_chunk.len() - index < 2 {
                     self.buffer.extend_from_slice(&new_chunk[index..]);
                     break;
@@ -211,8 +336,6 @@ impl MultiPartParser {
             }
 
             if self.state == MultiPartParserState::Header {
-                println!("Entering Header");
-
                 // minimum we need to parse for headers
                 if new_chunk.len() - index < 4 {
                     self.buffer.extend_from_slice(&new_chunk[index..]);
@@ -236,16 +359,15 @@ impl MultiPartParser {
                     return Err(MultiPartParserError::MaxHeaderLimitExceeded);
                 }
 
-                let header = &new_chunk[index..header_end_index];
+                let headers = &new_chunk[index..header_end_index];
 
-                self.current_part.set_headers(header);
+                self.current_part.set_headers(headers);
 
                 index = header_end_index + 4;
                 self.state = MultiPartParserState::Body;
             }
 
             if self.state == MultiPartParserState::Body {
-                println!("Entering Body");
                 if let Some(ref content_type) = self.current_part.content_type {
                     if content_type.starts_with("multipart/") {
                         if self.child_parser.is_none() {
@@ -271,6 +393,7 @@ impl MultiPartParser {
                         }
 
                         let child_parser = self.child_parser.as_mut().unwrap();
+
                         if child_parser.state != MultiPartParserState::Done {
                             child_parser.parse(&new_chunk[index..])?;
                             break;
@@ -289,16 +412,11 @@ impl MultiPartParser {
                                 self.parts.push(child_part);
                             }
 
+                            // parser is working fine till here
                             self.child_parser = None;
-                            // then update the index
-                            let start_of_boundary = substring_partial_search(
-                                &new_chunk,
-                                self.boundary_pattern.as_bytes(),
-                            );
 
-                            if start_of_boundary.is_none() {
-                                index = new_chunk.len() - 1;
-
+                            if self.index_after_child.is_none() {
+                                // this will be a multipart/mixed parent
                                 let curr_part = std::mem::replace(
                                     &mut self.current_part,
                                     MultiPart::new(
@@ -310,7 +428,10 @@ impl MultiPartParser {
                                 self.parts.push(curr_part);
                                 break;
                             } else {
-                                index = start_of_boundary.unwrap();
+                                index = self.index_after_child.unwrap();
+                                new_chunk.clear();
+                                new_chunk.extend_from_slice(&self.buffer);
+                                self.buffer.clear();
                             }
                         }
                     }
@@ -322,35 +443,34 @@ impl MultiPartParser {
                 }
 
                 let boundary_index =
-                    substring_search(&new_chunk, index, self.boundary_pattern[2..].as_bytes());
+                    substring_search(&new_chunk, index, self.boundary_pattern.as_bytes());
                 if boundary_index.is_none() {
-                    println!("Boundary not found");
-                    let stringified_bytes = String::from_utf8(new_chunk.to_vec()).unwrap();
-
-                    println!("Header Bytes are : {}", stringified_bytes);
                     // No boundary found, but there may be a partial match at the end of the chunk.
-                    let partial_tail_index =
-                        substring_partial_search(&new_chunk, self.boundary_pattern[2..].as_bytes());
+                    let partial_tail_index = substring_partial_search(
+                        &new_chunk[index..],
+                        self.boundary_pattern.as_bytes(),
+                    );
 
                     if partial_tail_index.is_none() {
-                        self.append(&chunk[index..])?;
+                        self.append(&new_chunk[index..])?;
                     } else {
-                        if (partial_tail_index.unwrap() > index) {
-                            self.append(&chunk[index..partial_tail_index.unwrap()])?;
+                        let partial_tail_index = partial_tail_index.unwrap();
+                        if partial_tail_index > index {
+                            self.append(&new_chunk[index..partial_tail_index])?;
                         }
-                        self.buffer = chunk[partial_tail_index.unwrap()..].to_vec();
+                        self.buffer = new_chunk[partial_tail_index..].to_vec();
                     }
 
                     break;
                 }
 
-                if (boundary_index.unwrap() > index) {
-                    self.append(&chunk[index..boundary_index.unwrap()])?;
+                let boundary_index = boundary_index.unwrap();
+                if boundary_index > index {
+                    self.append(&new_chunk[index..boundary_index])?;
                 }
 
                 // means that current part has been initialised
                 if !self.current_part.headers.is_none() {
-                    println!("Multipart {:#?}", self.current_part);
                     let curr_part = std::mem::replace(
                         &mut self.current_part,
                         MultiPart::new(self.max_body_limit_until_file, self.max_file_size),
@@ -359,7 +479,7 @@ impl MultiPartParser {
                     self.parts.push(curr_part);
                 }
 
-                index = boundary_index.unwrap() + self.boundary.len();
+                index = boundary_index + self.boundary.len() + 2 + 2;
 
                 self.state = MultiPartParserState::AfterBoundary;
             }
@@ -385,6 +505,7 @@ enum MultiPartParserError {
     MaxFileSizeExceededError,
     MaxTotalSizeExceededError,
     MaliciousPart,
+    TempFileError(),
 }
 
 #[derive(PartialEq)]
@@ -434,37 +555,36 @@ fn substring_search(haystack: &[u8], start: usize, needle: &[u8]) -> Option<usiz
 }
 
 fn substring_partial_search(haystack: &[u8], needle: &[u8]) -> Option<usize> {
+    if haystack.is_empty() || needle.is_empty() {
+        return None;
+    }
+
     let mut byte_indexes = HashMap::<u8, Vec<usize>>::new();
-    for i in needle {
-        byte_indexes
-            .entry(*i)
-            .and_modify(|v| v.push(*i as usize))
-            .or_insert(vec![]);
+    for (i, &byte) in needle.iter().enumerate() {
+        byte_indexes.entry(byte).or_insert_with(Vec::new).push(i);
     }
 
     let haystack_end = haystack.len() - 1;
 
-    if byte_indexes.contains_key(&haystack[haystack_end]) {
-        let indexes = byte_indexes.get(&haystack[haystack_end]).unwrap();
-
-        for i in indexes.iter().rev() {
-            let mut j = *i;
+    if let Some(indexes) = byte_indexes.get(&haystack[haystack_end]) {
+        for &i in indexes.iter().rev() {
+            let mut j = i;
             let mut k = haystack_end;
 
-            while j >= 0 && haystack[k] == needle[j] {
+            loop {
+                if haystack[k] != needle[j] {
+                    break;
+                }
                 if j == 0 {
                     return Some(k);
                 }
-
                 j -= 1;
                 k -= 1;
             }
         }
-    } else {
-        return None;
     }
 
-    Some(1)
+    None
 }
 
 #[cfg(test)]
@@ -473,7 +593,6 @@ mod tests {
 
     use super::*;
     const MOCK_MULTIPART_PAYLOAD: &[u8] = b"------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"username\"\r\n\r\njohn_doe\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"profile_picture\"; filename=\"profile.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x01\x00\x60\x00\x60\x00\x00\xFF\xDB\x00\x43\x00\x08\x06\x06\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{\"age\": 30, \"location\": \"New York\"}\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW--\r\n";
-
     #[test]
     fn parse_simple_multipart() {
         let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW".to_owned();
@@ -495,7 +614,7 @@ mod tests {
         }
 
         for ref part in parser.parts {
-            println!("Here are the parts {:#?}", part);
+            println!("Here are the parts {}", part);
         }
     }
 }

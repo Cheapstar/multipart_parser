@@ -1,10 +1,49 @@
 use std::{
     collections::HashMap,
     fmt,
-    io::{BufRead, Write},
+    io::{BufRead, Read, Seek, SeekFrom, Write},
 };
 
-use crate::parser::{DataType, MultiPartParserError};
+use tempfile::NamedTempFile;
+
+use crate::parser::MultiPartParserError;
+
+///
+///   This Represents the type of data that will multipart will contain.Meaning as the name suggests
+///        1. Bytes ( vector of bytes )
+///        2. File  ( NamedTempFile )
+#[derive(Debug)]
+
+pub enum DataType {
+    Bytes(Vec<u8>),
+    File(NamedTempFile),
+}
+
+impl fmt::Display for DataType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            DataType::Bytes(bytes) => write!(f, "Bytes({} bytes) {:#?}", bytes.len(), bytes),
+            DataType::File(named_temp_file) => match named_temp_file.as_file().try_clone() {
+                Ok(mut cloned) => {
+                    if let Err(e) = cloned.seek(SeekFrom::Start(0)) {
+                        return write!(f, "File(<error seeking: {}>)", e);
+                    }
+                    let mut buf = Vec::new();
+                    match cloned.read_to_end(&mut buf) {
+                        Ok(_) => write!(
+                            f,
+                            "File({} bytes, path={:?})",
+                            buf.len(),
+                            named_temp_file.path()
+                        ),
+                        Err(e) => write!(f, "File(<error reading file: {}>)", e),
+                    }
+                }
+                Err(e) => write!(f, "File(<error cloning handle: {}>)", e),
+            },
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct MultiPart {
@@ -106,7 +145,6 @@ impl MultiPart {
                 }
             }
 
-            // Already writing to a file — just keep appending (this branch was missing!)
             Some(DataType::File(mut temp_file)) => {
                 temp_file
                     .write_all(chunk)

@@ -1,56 +1,9 @@
-use std::{
-    collections::HashMap,
-    fmt,
-    io::{BufRead, Error, Read, Seek, SeekFrom, Write},
-};
-
-use tempfile::NamedTempFile;
+use std::io::Error;
 
 use crate::{
     multipart::MultiPart,
     search::{find_double_newline, substring_partial_search, substring_search},
 };
-
-#[derive(Debug)]
-
-pub enum DataType {
-    Bytes(Vec<u8>),
-    File(NamedTempFile),
-}
-
-impl DataType {
-    fn write_all(&mut self, chunk: &[u8]) -> Result<(), std::io::Error> {
-        match self {
-            DataType::Bytes(items) => items.write_all(chunk),
-            DataType::File(file) => file.write_all(chunk),
-        }
-    }
-}
-impl fmt::Display for DataType {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            DataType::Bytes(bytes) => write!(f, "Bytes({} bytes) {:#?}", bytes.len(), bytes),
-            DataType::File(named_temp_file) => match named_temp_file.as_file().try_clone() {
-                Ok(mut cloned) => {
-                    if let Err(e) = cloned.seek(SeekFrom::Start(0)) {
-                        return write!(f, "File(<error seeking: {}>)", e);
-                    }
-                    let mut buf = Vec::new();
-                    match cloned.read_to_end(&mut buf) {
-                        Ok(_) => write!(
-                            f,
-                            "File({} bytes, path={:?})",
-                            buf.len(),
-                            named_temp_file.path()
-                        ),
-                        Err(e) => write!(f, "File(<error reading file: {}>)", e),
-                    }
-                }
-                Err(e) => write!(f, "File(<error cloning handle: {}>)", e),
-            },
-        }
-    }
-}
 
 #[derive(Debug)]
 pub enum MultiPartParserError {
@@ -63,16 +16,16 @@ pub enum MultiPartParserError {
     MaxFileSizeExceededError,
     MaxTotalSizeExceededError,
     MaliciousPart,
+    UnfinishedPart,
     TempFileError(),
 }
 
 #[derive(PartialEq)]
-pub enum MultiPartParserState {
+enum MultiPartParserState {
     Start,
     Done,
     AfterBoundary,
     Body,
-    Boundary,
     Header,
 }
 
@@ -84,17 +37,28 @@ pub struct MultiPartParser {
     boundary: String,
     boundary_pattern: String,
     opening_boundary_length: u16,
-    boundary_length: u16,
     buffer: Vec<u8>,
     current_part: MultiPart,
     state: MultiPartParserState,
-    content_length: usize,
     child_parser: Option<Box<MultiPartParser>>,
     index_after_child: Option<usize>,
-    pub parts: Vec<MultiPart>,
+    parts: Vec<MultiPart>,
 }
 
 impl MultiPartParser {
+    /// Creates a new instance of the multipart parser.
+    ///
+    /// # Arguments
+    ///
+    /// * `max_header_size`(bytes) - Maximum header size allowed. Exceeding this will throw an error.
+    /// * `max_body_limit_until_file`(bytes) - Maximum size the body is allowed to remain in memory
+    ///   (buffer) before being transferred to a file.
+    /// * `max_file_size`(bytes) - Maximum allowed size for a received file.
+    /// * `boundary` - The multipart boundary string.
+    ///
+    /// # Returns
+    ///
+    /// A new `MultipartParser` instance.
     pub fn new(
         max_header_size: u16,
         max_body_limit_until_file: u32,
@@ -103,7 +67,6 @@ impl MultiPartParser {
         boundary: String,
     ) -> Self {
         let opening_boundary_length: u16 = boundary.len() as u16 + 2; // --boundary
-        let boundary_length = boundary.len() as u16 + 4; // \r\n--boundary
         let boundary_pattern = format!("\r\n--{boundary}");
 
         Self {
@@ -111,12 +74,10 @@ impl MultiPartParser {
             max_body_limit_until_file,
             max_file_size,
             opening_boundary_length,
-            boundary_length,
             boundary,
             boundary_pattern,
             state: MultiPartParserState::Start,
             buffer: Vec::<u8>::new(),
-            content_length: 0,
             child_parser: None,
             current_part: MultiPart::new(max_body_limit_until_file, max_file_size),
             parts: Vec::<MultiPart>::new(),
@@ -124,16 +85,53 @@ impl MultiPartParser {
         }
     }
 
+    /// Write a chunk of data to the parser.
+    ///
+    /// # Arguments
+    ///
+    /// * `chunk` - Chunk of body bytes to be parsed.
+    ///
+    /// # Errors
+    ///
+    /// Returns `MultiPartParserError`
+    ///
+    ///
+    /// # Examples
+    ///
+    /// ```no_run
+    /// # use std::io::Read;
+    /// let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
+    /// let mut chunk = [0u8; 80];
+    ///
+    /// let v = Vec::from(MOCK_MULTIPART_PAYLOAD);
+    /// let mut slice = &v[..];
+    /// loop {
+    ///     let bytes_read = slice.read(&mut chunk).unwrap();
+    ///     if bytes_read == 0 {
+    ///         break;
+    ///     }
+    ///     parser.parse(&chunk[..bytes_read]).unwrap();
+    /// }
+    ///
+    /// let parts = parser.get_parts();
+    /// ```
     pub fn parse(&mut self, chunk: &[u8]) -> Result<(), MultiPartParserError> {
+        // Malicious Body
         if self.state == MultiPartParserState::Done {
             return Err(MultiPartParserError::UnexpectedDataAtEndOfStream);
         }
 
+        // this holds the `previous unparsed data` + `current chunk` data
         let mut new_chunk = Vec::<u8>::new();
+
+        // this is used as the `cursor` in the unparsed chunk
         let mut index: usize = 0;
 
         if self.child_parser.is_none() {
             if !self.buffer.is_empty() {
+                // there is unparsed chunk from previous call
+                // append that to new_chunk
+
                 let new_chunk_size = self.buffer.len() + chunk.len();
                 new_chunk.reserve_exact(new_chunk_size);
                 new_chunk.extend_from_slice(&self.buffer);
@@ -149,7 +147,6 @@ impl MultiPartParser {
             if self.state != MultiPartParserState::Start {
                 // boundary has been found out
                 if self.buffer.is_empty() {
-                    // if this chunk contain boundary of parent parser then keep it here
                     let boundary_index_inside_chunk =
                         substring_search(&new_chunk, index, self.boundary_pattern.as_bytes());
 
@@ -162,6 +159,8 @@ impl MultiPartParser {
                             self.buffer.extend_from_slice(&new_chunk);
                         }
                     } else {
+                        // this section boundary is present in the current_chunk but the child_parser is unfinished
+                        // so save that chunk for later processing
                         self.index_after_child = boundary_index_inside_chunk;
                         self.buffer.extend_from_slice(&new_chunk);
                     }
@@ -175,16 +174,18 @@ impl MultiPartParser {
         loop {
             if self.state == MultiPartParserState::Start {
                 if new_chunk.len() < self.opening_boundary_length as usize {
+                    // chunk does not contain enough data for boundary
                     self.buffer.extend_from_slice(&new_chunk);
                     break;
                 }
 
+                // since this is the very first boundary we have to use it from 2.. onwards for boundary_patter
                 if substring_search(&new_chunk, index, self.boundary_pattern[2..].as_bytes())
                     .is_none()
                 {
                     return Err(MultiPartParserError::MissingInitialBoundary);
                 }
-                index = self.opening_boundary_length as usize;
+                index = self.opening_boundary_length as usize; // this is the index of "\r" - start of boundary
                 self.state = MultiPartParserState::AfterBoundary;
             }
 
@@ -217,6 +218,7 @@ impl MultiPartParser {
                     break;
                 }
 
+                // double_newline cuz it the last header's end and then the empty line separating header and body
                 let header_end_index = find_double_newline(&new_chunk, index);
 
                 if header_end_index.is_none() {
@@ -274,18 +276,8 @@ impl MultiPartParser {
                             break;
                         } else {
                             // remove all the part of child and append it to this parser's
-                            let number_of_child_parts = child_parser.parts.len();
-                            for i in 0..number_of_child_parts {
-                                let child_part = std::mem::replace(
-                                    &mut child_parser.parts[i],
-                                    MultiPart::new(
-                                        self.max_body_limit_until_file,
-                                        self.max_file_size,
-                                    ),
-                                );
-
-                                self.parts.push(child_part);
-                            }
+                            let mut child_parts = child_parser.get_parts()?;
+                            self.parts.append(&mut child_parts);
 
                             // parser is working fine till here
                             self.child_parser = None;
@@ -364,8 +356,22 @@ impl MultiPartParser {
         Ok(())
     }
 
-    pub fn append(&mut self, chunk: &[u8]) -> Result<(), MultiPartParserError> {
+    fn append(&mut self, chunk: &[u8]) -> Result<(), MultiPartParserError> {
         self.current_part.write(chunk)?;
         Ok(())
+    }
+
+    /// # Returns
+    ///     All the vector of all parsed parts or `MultipartParserError`  
+    pub fn get_parts(&mut self) -> Result<Vec<MultiPart>, MultiPartParserError> {
+        if self.state != MultiPartParserState::Done {
+            return Err(MultiPartParserError::UnfinishedPart);
+        }
+
+        let number_of_parts = self.parts.len();
+        let mut ret: Vec<MultiPart> = Vec::with_capacity(number_of_parts);
+        ret.append(&mut self.parts);
+
+        Ok(ret)
     }
 }

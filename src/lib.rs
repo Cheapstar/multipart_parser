@@ -1,6 +1,6 @@
 pub mod multipart;
 pub mod parser;
-pub mod search;
+mod search;
 
 pub use parser::MultiPartParser;
 
@@ -41,6 +41,8 @@ mod tests {
 
     #[test]
     fn parse_simple_multipart() {
+        println!("-----------------Simple-Multipart Test------------------------------");
+
         let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW".to_owned();
 
         let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
@@ -59,12 +61,17 @@ mod tests {
             parser.parse(&chunk[..bytes_read]).unwrap();
         }
 
-        for ref part in parser.parts {
-            println!("Here are the parts {}", part);
+        let parts = parser
+            .get_parts()
+            .expect("Error Occured While Extracting Parts.");
+        for ref part in parts {
+            println!("Simple Multipart {}", part);
         }
     }
     #[test]
     fn parse_nested_multipart() {
+        println!("-----------------Nested-Multipart Test------------------------------");
+
         let boundary = "----OuterBoundary7f3a9c2e".to_owned();
 
         let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
@@ -83,13 +90,18 @@ mod tests {
             parser.parse(&chunk[..bytes_read]).unwrap();
         }
 
-        for ref part in parser.parts {
+        let parts = parser
+            .get_parts()
+            .expect("Error Occured While Extracting Parts.");
+        for ref part in parts {
             println!("Here are the Nested parts {}", part);
         }
     }
 
     #[test]
     fn parse_empty_field() {
+        println!("-----------------Empty-Field Test------------------------------");
+
         let boundary = "----EmptyBoundary123".to_owned();
         let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
 
@@ -103,14 +115,18 @@ mod tests {
             }
             parser.parse(&chunk[..bytes_read]).unwrap();
         }
-
-        for ref part in parser.parts {
-            println!("Empty field part: {}", part);
+        let parts = parser
+            .get_parts()
+            .expect("Error Occured While Extracting Parts.");
+        for ref part in parts {
+            println!("Empty Multipart {}", part);
         }
     }
 
     #[test]
     fn parse_multiple_files() {
+        println!("-----------------Multi-File Test------------------------------");
+
         let boundary = "----MultiFileBoundaryAbc1".to_owned();
         let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
 
@@ -125,14 +141,19 @@ mod tests {
             parser.parse(&chunk[..bytes_read]).unwrap();
         }
 
-        assert_eq!(parser.parts.len(), 2);
-        for ref part in parser.parts {
-            println!("Multi-file part: {}", part);
+        let parts = parser
+            .get_parts()
+            .expect("Error Occured While Extracting Parts.");
+        assert_eq!(parts.len(), 2);
+        for ref part in parts {
+            println!("Multi-File Part {}", part);
         }
     }
 
     #[test]
     fn parse_large_field_promotes_to_file() {
+        println!("-----------------Large Field Test------------------------------");
+
         let boundary = "----LargeFieldBoundaryXYZ".to_owned();
         // max_body_limit_until_file is small (1024) so this 20,000-byte field
         // should get promoted to a temp file partway through.
@@ -149,15 +170,18 @@ mod tests {
             parser.parse(&chunk[..bytes_read]).unwrap();
         }
 
-        for ref part in parser.parts {
-            println!("Large field part: {}", part);
-            // Optionally assert it became a File variant, e.g.:
-            // assert!(matches!(part.data, Some(DataType::File(_))));
+        let parts = parser
+            .get_parts()
+            .expect("Error Occured While Extracting Parts.");
+        for ref part in parts {
+            println!("Large Field {}", part);
         }
     }
 
     #[test]
     fn parse_unicode_field() {
+        println!("-----------------Unicode Test------------------------------");
+
         let boundary = "----UnicodeBoundary456".to_owned();
         let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
 
@@ -172,13 +196,18 @@ mod tests {
             parser.parse(&chunk[..bytes_read]).unwrap();
         }
 
-        for ref part in parser.parts {
-            println!("Unicode part: {}", part);
+        let parts = parser
+            .get_parts()
+            .expect("Error Occured While Extracting Parts.");
+        for ref part in parts {
+            println!("Unicode {}", part);
         }
     }
 
     #[test]
     fn parse_custom_headers() {
+        println!("-----------------CustomHeadersTest------------------------------");
+
         let boundary = "----CustomHeaderBoundary789".to_owned();
         let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
 
@@ -193,8 +222,11 @@ mod tests {
             parser.parse(&chunk[..bytes_read]).unwrap();
         }
 
-        for ref part in parser.parts {
-            println!("Custom header part: {}", part);
+        let parts = parser
+            .get_parts()
+            .expect("Error Occured While Extracting Parts.");
+        for ref part in parts {
+            println!("Custom {}", part);
         }
     }
 }

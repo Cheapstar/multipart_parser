@@ -124,7 +124,7 @@ impl MultiPart {
                     let mut temp_file = tempfile::Builder::new()
                         .prefix("multipart")
                         .suffix(".tmp")
-                        .tempfile_in("temp_files/")
+                        .tempfile()
                         .map_err(|e| MultiPartParserError::IOError(e))?;
 
                     temp_file
@@ -144,7 +144,7 @@ impl MultiPart {
                     let mut temp_file = tempfile::Builder::new()
                         .prefix("multipart")
                         .suffix(".tmp")
-                        .tempfile_in("temp_files/")
+                        .tempfile()
                         .map_err(|e| MultiPartParserError::IOError(e))?;
 
                     temp_file

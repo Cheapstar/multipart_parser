@@ -2,6 +2,13 @@
 name = "multipart_parser"
 version = "0.1.0"
 edition = "2024"
+description = "A streaming, memory-safe multipart/form-data parser"
+license = "Apache-2.0" 
+repository = "https://github.com/Cheapstar/multipart_parser.git"
+readme = "README.md"
+keywords = ["multipart", "parser", "http", "form-data", "streaming"]
+categories = ["parser-implementations", "web-programming"]
+rust-version = "1.85"
 
 [dependencies]
 tempfile = "3.27.0"

@@ -1,3 +1,52 @@
+//! A streaming, memory-safe parser for `multipart/*` request bodies.
+//!
+//! `multipart_parser` is designed to be fed data incrementally, in chunks,
+//! rather than requiring the entire request body to be buffered in memory
+//! up front. Small parts are kept in memory, while larger ones are
+//! automatically spilled to a temporary file once configurable size
+//! thresholds are exceeded — guarding against unbounded memory growth from
+//! large or malicious uploads.
+//!
+//! # Example
+//!
+//! ```no_run
+//! use std::io::Read;
+//! use multipart_parser::MultiPartParser;
+//!
+//! # fn main() -> Result<(), Box<dyn std::error::Error>> {
+//! let boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW".to_string();
+//! let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
+//!
+//! let mut chunk = [0u8; 80];
+//! let mut source: &[u8] = &[]; // any `Read` source of multipart bytes
+//!
+//! loop {
+//!     let bytes_read = source.read(&mut chunk)?;
+//!     if bytes_read == 0 {
+//!         break;
+//!     }
+//!     parser.parse(&chunk[..bytes_read])?;
+//! }
+//!
+//! let parts = parser.get_parts();
+//! # Ok(())
+//! # }
+//! ```
+//!
+//! # Size limits
+//!
+//! Three limits are configured up front via [`MultiPartParser::new`]:
+//!
+//! - `max_header_size` — maximum size of a part's header section.
+//! - `max_body_limit_until_file` — maximum in-memory size before a part's
+//!   body is spilled to disk.
+//! - `max_file_size` — maximum total size allowed for a file part.
+//!
+//! # Errors
+//!
+//! Parsing failures are reported via [`MultiPartParserError`], which
+//! implements [`std::error::Error`].
+
 pub mod multipart;
 pub mod parser;
 mod search;

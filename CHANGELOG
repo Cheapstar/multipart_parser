@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-07-30
+
+### Fixed
+
+- Removed stray test log files that were accidentally included in the
+  `0.1.0` published package due to missing `exclude` rules in `Cargo.toml`.
+
 ## [0.1.0] - 2026-07-30
 
 ### Added
@@ -22,4 +29,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `std::error::Error` and `Display` implementations.
 
 [Unreleased]: https://github.com/Cheapstar/multipart_parser/compare/v0.1.0...HEAD
+[0.1.1]: https://github.com/YOUR_USERNAME/multipart_parser/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Cheapstar/multipart_parser/releases/tag/v0.1.0

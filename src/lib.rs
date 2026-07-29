@@ -7,6 +7,14 @@
 //! thresholds are exceeded — guarding against unbounded memory growth from
 //! large or malicious uploads.
 //!
+//!
+//! Originally inspired by [remix-run/multipart-parser], a TypeScript
+//! implementation focused on `multipart/form-data`. This crate ports the
+//! core approach to Rust and extends it to handle `multipart/*` content
+//! types more generally, rather than being limited to form data.
+//!
+//! [remix-run/multipart-parser]: https://github.com/remix-run/remix/tree/main/packages/multipart-parser
+//!
 //! # Example
 //!
 //! ```no_run

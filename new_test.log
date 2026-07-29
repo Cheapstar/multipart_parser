@@ -3,8 +3,8 @@ running 7 tests
 test tests::parse_custom_headers ... -----------------CustomHeadersTest------------------------------
 Custom MultiPart {
   headers: {
-    X-Custom-Meta: some-value,
     name: "custom",
+    X-Custom-Meta: some-value,
     content-disposition: form-data,
     Content-Type: text/plain,
   },
@@ -44,8 +44,8 @@ ok
 test tests::parse_empty_field ... -----------------Empty-Field Test------------------------------
 Empty Multipart MultiPart {
   headers: {
-    Content-Disposition: form-data,
     name: "empty_field",
+    Content-Disposition: form-data,
   },
   data: None,
   content_type: None,
@@ -56,11 +56,11 @@ ok
 test tests::parse_large_field_promotes_to_file ... -----------------Large Field Test------------------------------
 Large Field MultiPart {
   headers: {
-    Content-Disposition: form-data,
     name: "big_text",
+    Content-Disposition: form-data,
     Content-Type: text/plain,
   },
-  data: File(20000 bytes, path="/tmp/multipart5cvINn.tmp"),
+  data: File(20000 bytes, path="/tmp/multipartlVUwVq.tmp"),
   content_type: text/plain,
   max_body_limit_until_file: 1024,
   max_file_size: 30000,
@@ -69,10 +69,10 @@ ok
 test tests::parse_multiple_files ... -----------------Multi-File Test------------------------------
 Multi-File Part MultiPart {
   headers: {
-    Content-Disposition: form-data,
     filename: "a.txt",
-    Content-Type: text/plain,
+    Content-Disposition: form-data,
     name: "file1",
+    Content-Type: text/plain,
   },
   data: Bytes(20 bytes) [
     72,
@@ -102,9 +102,9 @@ Multi-File Part MultiPart {
 }
 Multi-File Part MultiPart {
   headers: {
-    Content-Disposition: form-data,
     filename: "b.txt",
     Content-Type: text/plain,
+    Content-Disposition: form-data,
     name: "file2",
   },
   data: Bytes(20 bytes) [
@@ -138,8 +138,8 @@ test tests::parse_nested_multipart ... -----------------Nested-Multipart Test---
 Here are the Nested parts MultiPart {
   headers: {
     Content-Type: application/json,
-    Content-Disposition: form-data,
     name: "metadata",
+    Content-Disposition: form-data,
   },
   data: Bytes(77 bytes) [
     123,
@@ -226,9 +226,9 @@ Here are the Nested parts MultiPart {
 }
 Here are the Nested parts MultiPart {
   headers: {
+    name: "description",
     charset: utf-8,
     Content-Disposition: form-data,
-    name: "description",
     Content-Type: text/plain,
   },
   data: Bytes(85 bytes) [
@@ -324,9 +324,9 @@ Here are the Nested parts MultiPart {
 }
 Here are the Nested parts MultiPart {
   headers: {
-    Content-Type: application/pdf,
-    Content-Disposition: attachment,
     filename: "invoice_q3.pdf",
+    Content-Disposition: attachment,
+    Content-Type: application/pdf,
   },
   data: Bytes(63 bytes) [
     37,
@@ -533,10 +533,10 @@ Here are the Nested parts MultiPart {
 }
 Here are the Nested parts MultiPart {
   headers: {
-    boundary: InnerBoundary1d5e8b41,
-    name: "attachments",
     Content-Disposition: form-data,
+    boundary: InnerBoundary1d5e8b41,
     Content-Type: multipart/mixed,
+    name: "attachments",
   },
   data: None,
   content_type: multipart/mixed,
@@ -547,8 +547,8 @@ Here are the Nested parts MultiPart {
   headers: {
     Content-Disposition: form-data,
     name: "submitted_by",
-    charset: utf-8,
     Content-Type: text/plain,
+    charset: utf-8,
   },
   data: Bytes(20 bytes) [
     106,
@@ -580,8 +580,8 @@ ok
 test tests::parse_simple_multipart ... -----------------Simple-Multipart Test------------------------------
 Simple Multipart MultiPart {
   headers: {
-    name: "username",
     Content-Disposition: form-data,
+    name: "username",
   },
   data: Bytes(8 bytes) [
     106,
@@ -599,10 +599,10 @@ Simple Multipart MultiPart {
 }
 Simple Multipart MultiPart {
   headers: {
+    Content-Disposition: form-data,
     name: "profile_picture",
     filename: "profile.jpg",
     Content-Type: image/jpeg,
-    Content-Disposition: form-data,
   },
   data: Bytes(28 bytes) [
     255,
@@ -640,9 +640,9 @@ Simple Multipart MultiPart {
 }
 Simple Multipart MultiPart {
   headers: {
-    Content-Disposition: form-data,
     name: "metadata",
     Content-Type: application/json,
+    Content-Disposition: form-data,
   },
   data: Bytes(35 bytes) [
     123,
@@ -689,10 +689,10 @@ ok
 test tests::parse_unicode_field ... -----------------Unicode Test------------------------------
 Unicode MultiPart {
   headers: {
-    name: "greeting",
-    Content-Type: text/plain,
     Content-Disposition: form-data,
+    Content-Type: text/plain,
     charset: utf-8,
+    name: "greeting",
   },
   data: Bytes(19 bytes) [
     228,
@@ -726,6 +726,6 @@ test result: ok. 7 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; fini
 
 running 0 tests
 
-test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 3 filtered out; finished in 0.00s
 
 all doctests ran in 0.05s; merged doctests compilation took 0.04s

@@ -51,13 +51,10 @@ pub mod multipart;
 pub mod parser;
 mod search;
 
-pub use parser::MultiPartParser;
-
 #[cfg(test)]
 mod tests {
+    use crate::parser::MultiPartParser;
     use std::io::Read;
-
-    use super::*;
     const MOCK_MULTIPART_PAYLOAD: &[u8] = b"------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"username\"\r\n\r\njohn_doe\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"profile_picture\"; filename=\"profile.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x01\x00\x60\x00\x60\x00\x00\xFF\xDB\x00\x43\x00\x08\x06\x06\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{\"age\": 30, \"location\": \"New York\"}\r\n------WebKitFormBoundary7MA4YWxkTrZu0gW--\r\n";
     const MOCK_NESTED_MULTIPART_PAYLOAD: &[u8] = b"------OuterBoundary7f3a9c2e\r\nContent-Disposition: form-data; name=\"metadata\"\r\nContent-Type: application/json\r\n\r\n{\"user_id\": 4821, \"action\": \"bulk_upload\", \"tags\": [\"invoice\", \"2026\", \"q3\"]}\r\n------OuterBoundary7f3a9c2e\r\nContent-Disposition: form-data; name=\"description\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nThis upload contains a quarterly invoice batch along with its supporting attachments.\r\n------OuterBoundary7f3a9c2e\r\nContent-Disposition: form-data; name=\"attachments\"\r\nContent-Type: multipart/mixed; boundary=InnerBoundary1d5e8b41\r\n\r\n--InnerBoundary1d5e8b41\r\nContent-Disposition: attachment; filename=\"invoice_q3.pdf\"\r\nContent-Type: application/pdf\r\n\r\n%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n%%EOF\r\n--InnerBoundary1d5e8b41\r\nContent-Disposition: attachment; filename=\"receipt_scan.png\"\r\nContent-Type: image/png\r\n\r\n\xFF\xD8\xFF\xE0\x00\x10JFIF\x00\x01\x01\x01\x00\x60\x00\x60\x00\x00\xFF\xDB\x00\x43\x00\x08\x06\x06\r\n--InnerBoundary1d5e8b41\r\nContent-Disposition: attachment; filename=\"notes.txt\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nScanned receipt is slightly faded on the top-left corner, but totals are legible.\r\n--InnerBoundary1d5e8b41--\r\n\r\n------OuterBoundary7f3a9c2e\r\nContent-Disposition: form-data; name=\"submitted_by\"\r\nContent-Type: text/plain; charset=utf-8\r\n\r\njane.doe@example.com\r\n------OuterBoundary7f3a9c2e--\r\n";
     // 1. Empty body value (field with no content at all)

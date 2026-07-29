@@ -8,12 +8,13 @@ use tempfile::NamedTempFile;
 
 use crate::parser::MultiPartParserError;
 
+/// Represents the type of data a [`MultiPart`] contains.
 ///
-///   This Represents the type of data that will multipart will contain.Meaning as the name suggests
-///        1. Bytes ( vector of bytes )
-///        2. File  ( NamedTempFile )
+/// A part's data is held as one of the following, depending on its size:
+///
+/// 1. [`Bytes`](DataType::Bytes) — held entirely in memory as a `Vec<u8>`.
+/// 2. [`File`](DataType::File) — held in `NamedTempFile`.
 #[derive(Debug)]
-
 pub enum DataType {
     Bytes(Vec<u8>),
     File(NamedTempFile),
@@ -45,17 +46,29 @@ impl fmt::Display for DataType {
     }
 }
 
+/// Represents a single part of a multipart body.
 #[derive(Debug)]
 pub struct MultiPart {
+    /// Headers associated with this part (e.g. `Content-Disposition`,
+    /// `Content-Type`), keyed by header name.
     pub headers: Option<HashMap<String, String>>,
+    /// The body data for this part. `None` until data has been parsed.
+    /// See [`DataType`] for the possible in-memory vs. on-disk forms.
     pub data: Option<DataType>,
+    /// The `Content-Type` of this part, if one was specified in its
+    /// headers.
     pub content_type: Option<String>,
-    pub max_body_limit_until_file: u32,
-    pub max_file_size: u32,
+
+    /// Maximum size this part's body may reach while held in memory
+    /// before being spilled to a temporary file.
+    max_body_limit_until_file: u32,
+    /// Maximum total size allowed for this part if it is a file.
+    max_file_size: u32,
 }
 
 impl MultiPart {
-    pub fn new(max_body_limit_until_file: u32, max_file_size: u32) -> Self {
+    /// Creates a new, empty `MultiPart` with the given size limits.
+    pub(crate) fn new(max_body_limit_until_file: u32, max_file_size: u32) -> Self {
         Self {
             headers: None,
             data: None,
@@ -65,7 +78,8 @@ impl MultiPart {
         }
     }
 
-    pub fn set_headers(&mut self, header_bytes: &[u8]) {
+    /// Parses the given raw header bytes and populates `self.headers`
+    pub(crate) fn set_headers(&mut self, header_bytes: &[u8]) {
         let mut headers = HashMap::<String, String>::new();
         header_bytes.lines().for_each(|s| {
             let line = s.unwrap();
@@ -95,7 +109,8 @@ impl MultiPart {
         self.headers = Some(headers);
     }
 
-    pub fn write(&mut self, chunk: &[u8]) -> Result<(), MultiPartParserError> {
+    /// Populates to the current body of the Multipart as per the [`DataType`]
+    pub(crate) fn write(&mut self, chunk: &[u8]) -> Result<(), MultiPartParserError> {
         let headers = self.headers.as_ref().unwrap();
         let is_file_part = headers
             .get("content-disposition")
@@ -146,6 +161,16 @@ impl MultiPart {
             }
 
             Some(DataType::File(mut temp_file)) => {
+                let curr_size = temp_file
+                    .as_file()
+                    .metadata()
+                    .map_err(|e| MultiPartParserError::IOError(e))?
+                    .len() as usize;
+
+                if curr_size + chunk.len() > (self.max_file_size as usize) {
+                    return Err(MultiPartParserError::MaxFileSizeExceededError);
+                }
+
                 temp_file
                     .write_all(chunk)
                     .map_err(|e| MultiPartParserError::IOError(e))?;

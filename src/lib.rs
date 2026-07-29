@@ -157,7 +157,7 @@ mod tests {
         let boundary = "----LargeFieldBoundaryXYZ".to_owned();
         // max_body_limit_until_file is small (1024) so this 20,000-byte field
         // should get promoted to a temp file partway through.
-        let mut parser = MultiPartParser::new(1024, 1024, 8 * 1024, boundary);
+        let mut parser = MultiPartParser::new(1024, 1024, 30000, boundary);
 
         let payload = build_large_field_payload();
         let mut chunk = [0u8; 256];

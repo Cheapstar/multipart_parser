@@ -5,30 +5,98 @@ use crate::{
     search::{find_double_newline, substring_partial_search, substring_search},
 };
 
+/// Represents the error During Parsing
 #[derive(Debug)]
 pub enum MultiPartParserError {
-    IOError(Error),
+    /// Error occurred during temporary file I/O.
+    IOError(std::io::Error),
+    /// More data is being sent after parsing is finished
     UnexpectedDataAtEndOfStream,
+    /// Invalid Character appeared in boundary
     InvalidCharacterInBoundary,
+    /// Initial Boundary of Part is Missing
     MissingInitialBoundary,
+    /// Unusual Boundary Detected
     MalformedMultiPartBoundary,
+    /// Maximum Limit For Header is Exceeded
     MaxHeaderLimitExceeded,
+    /// Maximum File Size is Exceeded
     MaxFileSizeExceededError,
-    MaxTotalSizeExceededError,
+    /// Malicious MultiPart Detected During Parsing
     MaliciousPart,
+    /// Stream Ended in the Middle of Parsing
     UnfinishedPart,
-    TempFileError(),
 }
 
+impl std::fmt::Display for MultiPartParserError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::IOError(e) => write!(f, "I/O error: {e}"),
+            Self::UnexpectedDataAtEndOfStream => {
+                write!(f, "unexpected data received after end of stream")
+            }
+            Self::InvalidCharacterInBoundary => {
+                write!(f, "invalid character found in boundary")
+            }
+            Self::MissingInitialBoundary => {
+                write!(f, "initial boundary of part is missing")
+            }
+            Self::MalformedMultiPartBoundary => {
+                write!(f, "malformed multipart boundary detected")
+            }
+            Self::MaxHeaderLimitExceeded => {
+                write!(f, "maximum allowed header size exceeded")
+            }
+            Self::MaxFileSizeExceededError => {
+                write!(f, "maximum allowed file size exceeded")
+            }
+            Self::MaliciousPart => {
+                write!(f, "malicious part detected during parsing")
+            }
+            Self::UnfinishedPart => {
+                write!(f, "stream ended in the middle of parsing a part")
+            }
+        }
+    }
+}
+
+impl std::error::Error for MultiPartParserError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::IOError(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+/// Represents the state of the `MultiPartParser`'s state machine.
 #[derive(PartialEq)]
 enum MultiPartParserState {
+    /// Start of the body.
     Start,
+    /// Body parsing is finished.
     Done,
+    /// Section right after a boundary.
     AfterBoundary,
+    /// State machine is inside the body of a part.
     Body,
+    /// State machine is processing a part's header.
     Header,
 }
 
+/// A streaming parser for `multipart/form-data` request bodies.
+///
+/// `MultiPartParser` is designed to be fed data incrementally via [`parse`],
+/// rather than requiring the entire body to be loaded into memory up front.
+/// Small parts are buffered in memory, while larger ones are spilled to a
+/// temporary file once configurable size thresholds are exceeded, guarding
+/// against unbounded memory growth from large or malicious uploads.
+///
+/// Once all chunks have been fed in, parsed parts can be retrieved with
+/// [`get_parts`].
+///
+/// [`parse`]: MultiPartParser::parse
+/// [`get_parts`]: MultiPartParser::get_parts
 pub struct MultiPartParser {
     max_header_size: u16,
     max_body_limit_until_file: u32,

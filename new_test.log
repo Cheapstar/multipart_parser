@@ -3,9 +3,9 @@ running 7 tests
 test tests::parse_custom_headers ... -----------------CustomHeadersTest------------------------------
 Custom MultiPart {
   headers: {
-    X-Custom-Meta: some-value,
-    content-disposition: form-data,
     name: "custom",
+    content-disposition: form-data,
+    X-Custom-Meta: some-value,
     Content-Type: text/plain,
   },
   data: Bytes(26 bytes) [
@@ -56,23 +56,23 @@ ok
 test tests::parse_large_field_promotes_to_file ... -----------------Large Field Test------------------------------
 Large Field MultiPart {
   headers: {
+    Content-Disposition: form-data,
     name: "big_text",
     Content-Type: text/plain,
-    Content-Disposition: form-data,
   },
-  data: File(20000 bytes, path="/home/prasang/rust-repo/multipart_parser/temp_files/multipartWYCohi.tmp"),
+  data: File(20000 bytes, path="/home/prasang/rust-repo/multipart_parser/temp_files/multipart5kGDtT.tmp"),
   content_type: text/plain,
   max_body_limit_until_file: 1024,
-  max_file_size: 8192,
+  max_file_size: 30000,
 }
 ok
 test tests::parse_multiple_files ... -----------------Multi-File Test------------------------------
 Multi-File Part MultiPart {
   headers: {
     name: "file1",
-    Content-Disposition: form-data,
     Content-Type: text/plain,
     filename: "a.txt",
+    Content-Disposition: form-data,
   },
   data: Bytes(20 bytes) [
     72,
@@ -102,9 +102,9 @@ Multi-File Part MultiPart {
 }
 Multi-File Part MultiPart {
   headers: {
-    name: "file2",
     Content-Disposition: form-data,
     filename: "b.txt",
+    name: "file2",
     Content-Type: text/plain,
   },
   data: Bytes(20 bytes) [
@@ -137,8 +137,8 @@ ok
 test tests::parse_nested_multipart ... -----------------Nested-Multipart Test------------------------------
 Here are the Nested parts MultiPart {
   headers: {
-    Content-Disposition: form-data,
     Content-Type: application/json,
+    Content-Disposition: form-data,
     name: "metadata",
   },
   data: Bytes(77 bytes) [
@@ -227,9 +227,9 @@ Here are the Nested parts MultiPart {
 Here are the Nested parts MultiPart {
   headers: {
     Content-Disposition: form-data,
-    charset: utf-8,
-    Content-Type: text/plain,
     name: "description",
+    Content-Type: text/plain,
+    charset: utf-8,
   },
   data: Bytes(85 bytes) [
     84,
@@ -324,8 +324,8 @@ Here are the Nested parts MultiPart {
 }
 Here are the Nested parts MultiPart {
   headers: {
-    Content-Type: application/pdf,
     filename: "invoice_q3.pdf",
+    Content-Type: application/pdf,
     Content-Disposition: attachment,
   },
   data: Bytes(63 bytes) [
@@ -439,10 +439,10 @@ Here are the Nested parts MultiPart {
 }
 Here are the Nested parts MultiPart {
   headers: {
-    filename: "notes.txt",
     Content-Type: text/plain,
-    charset: utf-8,
     Content-Disposition: attachment,
+    filename: "notes.txt",
+    charset: utf-8,
   },
   data: Bytes(81 bytes) [
     83,
@@ -534,9 +534,9 @@ Here are the Nested parts MultiPart {
 Here are the Nested parts MultiPart {
   headers: {
     boundary: InnerBoundary1d5e8b41,
-    name: "attachments",
     Content-Disposition: form-data,
     Content-Type: multipart/mixed,
+    name: "attachments",
   },
   data: None,
   content_type: multipart/mixed,
@@ -545,10 +545,10 @@ Here are the Nested parts MultiPart {
 }
 Here are the Nested parts MultiPart {
   headers: {
-    charset: utf-8,
+    name: "submitted_by",
     Content-Type: text/plain,
     Content-Disposition: form-data,
-    name: "submitted_by",
+    charset: utf-8,
   },
   data: Bytes(20 bytes) [
     106,
@@ -599,10 +599,10 @@ Simple Multipart MultiPart {
 }
 Simple Multipart MultiPart {
   headers: {
-    Content-Disposition: form-data,
-    Content-Type: image/jpeg,
     name: "profile_picture",
+    Content-Disposition: form-data,
     filename: "profile.jpg",
+    Content-Type: image/jpeg,
   },
   data: Bytes(28 bytes) [
     255,
@@ -689,10 +689,10 @@ ok
 test tests::parse_unicode_field ... -----------------Unicode Test------------------------------
 Unicode MultiPart {
   headers: {
-    Content-Disposition: form-data,
-    Content-Type: text/plain,
     charset: utf-8,
+    Content-Disposition: form-data,
     name: "greeting",
+    Content-Type: text/plain,
   },
   data: Bytes(19 bytes) [
     228,
@@ -728,4 +728,4 @@ running 0 tests
 
 test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s
 
-all doctests ran in 0.12s; merged doctests compilation took 0.12s
+all doctests ran in 0.04s; merged doctests compilation took 0.04s

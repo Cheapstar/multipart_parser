@@ -51,6 +51,7 @@ impl fmt::Display for DataType {
 pub struct MultiPart {
     /// Headers associated with this part (e.g. `Content-Disposition`,
     /// `Content-Type`), keyed by header name.
+    /// This is Option Because it is allowed by RFC for headers to be empty
     pub headers: Option<HashMap<String, String>>,
     /// The body data for this part. `None` until data has been parsed.
     /// See [`DataType`] for the possible in-memory vs. on-disk forms.

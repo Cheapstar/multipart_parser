@@ -1,0 +1,25 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+## [0.1.0] - 2026-07-30
+
+### Added
+
+- Initial release of `multipart_parser`.
+- Streaming, chunk-based `MultiPartParser` for parsing `multipart/*` request bodies.
+- Configurable limits: `max_header_size`, `max_body_limit_until_file`, `max_file_size`.
+- Automatic spillover of large parts to temporary files via `tempfile`.
+- `MultiPart` struct exposing `headers`, `data`, and `content_type`.
+- `DataType` enum representing part data as either in-memory `Bytes` or an on-disk `File`.
+- `MultiPartParserError` error type covering malformed boundaries, exceeded size
+  limits, malicious parts, and unexpected stream termination, with
+  `std::error::Error` and `Display` implementations.
+
+[Unreleased]: https://github.com/Cheapstar/multipart_parser/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Cheapstar/multipart_parser/releases/tag/v0.1.0

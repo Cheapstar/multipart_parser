@@ -2,7 +2,7 @@
 name = "multipart_parser"
 version = "0.1.1"
 edition = "2024"
-description = "A streaming, memory-safe multipart/form-data parser"
+description = "A streaming, memory-safe multipart/* parser"
 license = "Apache-2.0" 
 repository = "https://github.com/Cheapstar/multipart_parser.git"
 readme = "README.md"

@@ -190,54 +190,49 @@ impl MultiPartParser {
         }
 
         // this holds the `previous unparsed data` + `current chunk` data
-        let mut new_chunk = Vec::<u8>::new();
+        let mut out_buf;
 
         // this is used as the `cursor` in the unparsed chunk
         let mut index: usize = 0;
 
-        if self.child_parser.is_none() {
-            if !self.buffer.is_empty() {
-                // there is unparsed chunk from previous call
-                // append that to new_chunk
-
-                let new_chunk_size = self.buffer.len() + chunk.len();
-                new_chunk.reserve_exact(new_chunk_size);
-                new_chunk.extend_from_slice(&self.buffer);
-                new_chunk.extend_from_slice(chunk);
-                self.buffer.clear();
-                self.buffer.shrink_to(0);
+        let mut new_chunk = if self.child_parser.is_none() {
+            let inner = if !self.buffer.is_empty() {
+                self.buffer.extend_from_slice(chunk);
+                out_buf = std::mem::take(&mut self.buffer);
+                &out_buf
             } else {
-                new_chunk.extend_from_slice(chunk);
-            }
+                chunk
+            };
+            inner
         } else {
-            new_chunk.extend_from_slice(chunk);
-
             if self.state != MultiPartParserState::Start {
                 // boundary has been found out
                 if self.buffer.is_empty() {
                     let boundary_index_inside_chunk =
-                        substring_search(&new_chunk, index, self.boundary_pattern.as_bytes());
+                        substring_search(chunk, index, self.boundary_pattern.as_bytes());
 
                     if boundary_index_inside_chunk.is_none() {
                         let partial_boundary_check =
-                            substring_partial_search(&new_chunk, self.boundary_pattern.as_bytes());
+                            substring_partial_search(chunk, self.boundary_pattern.as_bytes());
 
                         self.index_after_child = partial_boundary_check;
                         if !partial_boundary_check.is_none() {
-                            self.buffer.extend_from_slice(&new_chunk);
+                            self.buffer.extend_from_slice(chunk);
                         }
                     } else {
                         // this section boundary is present in the current_chunk but the child_parser is unfinished
                         // so save that chunk for later processing
                         self.index_after_child = boundary_index_inside_chunk;
-                        self.buffer.extend_from_slice(&new_chunk);
+                        self.buffer.extend_from_slice(chunk);
                     }
                 } else {
                     // boundary has been previously found out , so just append the just to use it later on
-                    self.buffer.extend_from_slice(&new_chunk);
+                    self.buffer.extend_from_slice(chunk);
                 }
             }
-        }
+
+            chunk
+        };
 
         loop {
             if self.state == MultiPartParserState::Start {
@@ -364,9 +359,8 @@ impl MultiPartParser {
                                 break;
                             } else {
                                 index = self.index_after_child.unwrap();
-                                new_chunk.clear();
-                                new_chunk.extend_from_slice(&self.buffer);
-                                self.buffer.clear();
+                                out_buf = std::mem::take(&mut self.buffer);
+                                new_chunk = &out_buf;
                             }
                         }
                     }
